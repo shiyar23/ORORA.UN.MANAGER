@@ -52,6 +52,27 @@ RENEW_PRICES = {"vip_only": 10, "ai_only": 65, "both": 55}
 # === النصوص ===
 TEXT = {
     "ar": {
+        "welcome": """
+        ORORA.UN 
+        
+        🟢 مرحبًا بك في البوابة الرسمية للثراء الحقيقي 
+        
+        نحن هنا لنأخذك من الصفر إلى القمة في عالم التداول والاستثمار بأسرع وأضمن الطرق الممكنة 
+        
+        ماذا ستحصل عندنا؟
+        
+        ✅ أقوى دورات تعليمية من الصفر إلى الاحتراف  
+        ✅ استراتيجيات تداول حصرية بمعدل نجاح +87%  
+        ✅ قنوات توصيات VIP للنخبة فقط (صفقات المليون يوميًا)  
+        ✅ بوت تداول آلي ينفّذ الصفقات بدلك 24/7 ويحقق أرباح حتى وأنت نايم ⚡  
+        ✅ إشراف مباشر من مدرب شخصي 24/7  
+        ✅ مساعد ذكي يحلل السوق لحظيًا ويعطيك الإشارات فورًا  
+        ✅ دعم فني ونفسي مستمر حتى تصل لهدفك المالي 
+        
+        كل هذا بأفضل سعر في السوق + ضمان استرجاع الأموال 7 أيام إذا ما شفت نتائج حقيقية!
+        
+        اختر الباقة اللي تناسب طموحك الآن وابدأ رحلتك للحرية المالية خلال أيام قليلة فقط ⬇️
+        """,
         "welcome": "ORORA.UN \n\n🟢 مرحبًا بك في البوابة الرسمية... اختر الباقة اللي تناسب طموحك الآن ⬇️",
         "vip_only": "📈 توصيات VIP فقط\n• أرباح يومية مضمونة\nالسعر: 16$",
         "ai_only": "🤖 المساعد الذكي فقط\nالسعر: 76$",
@@ -138,16 +159,23 @@ def is_valid_email(email):
     pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
     return re.match(pattern, email.strip()) is not None
 
-@bot.message_handler(func=lambda m: str(m.chat.id) in db["users"] and db["users"][str(m.chat.id)]["step"] == "coin")
-def choose_coin(m):
+@bot.message_handler(func=lambda m: str(m.chat.id) in db["users"] and db["users"][str(m.chat.id)]["step"] == "email")
+def get_email(m):
     uid = str(m.chat.id)
+    email = m.text.strip()
+
+    if not is_valid_email(email):
+        bot.reply_to(m, t("invalid_email"))
+        return
+
+    db["users"][uid]["email"] = email
+    db["users"][uid]["step"] = "coin"
+    save_db()
 
     markup = InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        InlineKeyboardButton("USDT", callback_data="coin_USDT"),
-        InlineKeyboardButton("USDC", callback_data="coin_USDC")
-    )
-    bot.send_message(uid, "💰 اختر العملة:", reply_markup=markup)
+    for coin in ["USDT", "BTC", "ETH", "BNB"]:
+        markup.add(InlineKeyboardButton(coin, callback_data=f"coin_{coin}"))
+    bot.reply_to(m, t("choose_coin"), reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("coin_"))
 def coin_selected(c):
@@ -158,55 +186,6 @@ def coin_selected(c):
     bot.answer_callback_query(c.id)
 
     create_payment(uid, coin.lower())
-
-@bot.callback_query_handler(func=lambda c: c.data.startswith("coin_"))
-def coin_selected(c):
-    uid = str(c.message.chat.id)
-    coin = c.data.split("_")[1]  # USDT / USDC
-    db["users"][uid]["coin"] = coin
-    db["users"][uid]["step"] = "network"
-    save_db()
-    bot.answer_callback_query(c.id)
-
-    markup = InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        InlineKeyboardButton("TRC20", callback_data=f"net_TRC20"),
-        InlineKeyboardButton("ERC20", callback_data=f"net_ERC20"),
-        InlineKeyboardButton("BSC", callback_data=f"net_BSC")
-    )
-
-    bot.send_message(uid, f"🌐 اختر الشبكة الخاصة بعملة {coin}:", reply_markup=markup)
-
-
-@bot.callback_query_handler(func=lambda c: c.data.startswith("net_"))
-def network_selected(c):
-    uid = str(c.message.chat.id)
-    network = c.data.split("_")[1]  # TRC20 / ERC20 / BSC
-
-    coin = db["users"][uid]["coin"]
-
-    # خريطة الشبكات الرسمية لـ NOWPayments
-    mapping = {
-        "USDT": {
-            "TRC20": "usdttrc20",
-            "ERC20": "usdteth",
-            "BSC": "usdtbsc"
-        },
-        "USDC": {
-            "TRC20": "usdctrc20",
-            "ERC20": "usdceth",
-            "BSC": "usdcbsc"
-        }
-    }
-
-    pay_currency = mapping[coin][network]
-
-    db["users"][uid]["network"] = network
-    db["users"][uid]["pay_currency"] = pay_currency
-    save_db()
-    bot.answer_callback_query(c.id)
-
-    create_payment(uid, pay_currency)
 
 # === مساعدة: الحصول على رقم الفاتورة من استجابة NOWPayments بشكل آمن ===
 def extract_invoice_id(resp_json: dict):
