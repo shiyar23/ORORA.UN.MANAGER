@@ -317,17 +317,16 @@ def create_payment(uid, pay_currency, network=None):
         # ]
         
         # التحقق قبل إضافة fixed_rate
-        if pay_currency.lower() not in [
-            # USDT
-            "usdttrc20", "usdterc20", "usdtbsc", "usdtpolygon", "usdtsol", "usdtavax", "usdton",
-            # USDC
-            "usdctrc20", "usdcerc20", "usdcbsc", "usdcpolygon", "usdcsol",
-            # العملات الأساسية الأخرى
+# فقط العملات الأساسية التي تدعم fixed_rate
+        FIXED_RATE_ALLOWED = [
             "btc", "eth", "bnb", "trx", "sol", "matic", "avax"
-        ]:
-            print(f"[INFO] fixed_rate تم تجاهله لـ {pay_currency}")
-        else:
+        ]
+        
+        # التحقق قبل إضافة fixed_rate
+        if pay_currency.lower() in FIXED_RATE_ALLOWED:
             payload["fixed_rate"] = True
+        else:
+            print(f"[INFO] fixed_rate تم تجاهله لـ {pay_currency}")
             r = requests.post(url, json=payload, headers=headers, timeout=20)
         try:
             data = r.json()
