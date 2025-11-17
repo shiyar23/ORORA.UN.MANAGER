@@ -77,7 +77,6 @@ def t(uid, key):
 # قائمة العملات والشبكات (تعدّلها زي ما تحب)
 COINS = {
     "USDT": ["TRC20", "ERC20", "BEP20", "Polygon", "Arbitrum", "Optimism"],
-    "USDC": ["ERC20", "TRC20", "Polygon", "BEP20", "Arbitrum", "Optimism", "Base", "Solana"],
     "BTC": ["Bitcoin"],
     "ETH": ["Ethereum"],
     "BNB": ["BEP20"],
