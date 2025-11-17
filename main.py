@@ -236,13 +236,13 @@ def coin_selected(c):
     db["users"][uid]["coin"] = coin
     db["users"][uid]["step"] = "choose_network"
     save_db()
+    
+     networks = SUPPORTED_COINS.get(coin, {}).get("networks", {})
+     markup = InlineKeyboardMarkup(row_width=1)
+     for net_code, net_name in networks.items():
+         callback_data: net_<COIN>_<NETWORK_CODE>
+         markup.add(InlineKeyboardButton(net_name, callback_data=f"net_{coin}_{net_code}"))
 
-    # جلب الشبكات المتاحة للعرض
-    # networks = SUPPORTED_COINS.get(coin, {}).get("networks", {})
-    # markup = InlineKeyboardMarkup(row_width=1)
-    # for net_code, net_name in networks.items():
-    #     # callback_data: net_<COIN>_<NETWORK_CODE>
-    #     markup.add(InlineKeyboardButton(net_name, callback_data=f"net_{coin}_{net_code}"))
     # فقط الشبكات المدعومة حاليًا من NOWPayments لكل عملة
     SUPPORTED_NETWORKS_FOR_PAYMENTS = {
         "USDT": ["trc20", "bsc"],
@@ -262,13 +262,8 @@ def coin_selected(c):
     for net_code in networks:
         net_name = SUPPORTED_COINS[coin]["networks"][net_code]
         markup.add(InlineKeyboardButton(net_name, callback_data=f"net_{coin}_{net_code}"))
-
-    bot.edit_message_text(
-        chat_id=c.message.chat.id,
-        message_id=c.message.message_id,
-        text=t("choose_network", coin=SUPPORTED_COINS[coin]["name"]),
-        reply_markup=markup
-    )
+    # فقط الشبكات المدعومة حاليًا من NOWPayments لكل عملة
+    
 
 # === اختيار الشبكة وإنشاء الفاتورة ===
 @bot.callback_query_handler(func=lambda c: c.data.startswith("net_"))
