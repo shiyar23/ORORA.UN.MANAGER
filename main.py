@@ -32,7 +32,7 @@ CHANNELS = {
     "ai": os.getenv("AI_CHANNEL")
 }
 
-PRICES = {"vip_only": 15, "ai_only": 75, "both": 65}
+PRICES = {"vip_only": 16, "ai_only": 76, "both": 66}
 RENEW_PRICES = {"vip_only": 10, "ai_only": 65, "both": 55}
 
 TEXT = {
@@ -48,8 +48,10 @@ TEXT = {
         
         ✅ أقوى دورات تعليمية من الصفر إلى الاحتراف  
         ✅ استراتيجيات تداول حصرية بمعدل نجاح 90%  
-        ✅ قنوات توصيات VIP للنخبة فقط (صفقات المليون يوميًا)  
-        ✅ بوت تداول آلي ينفّذ الصفقات بدلك 24/7 ويحقق أرباح حتى وأنت نايم ⚡  
+        ✅ قنوات توصيات 
+        VIP للنخبة فقط (صفقات المليون يوميًا)  
+        ✅ بوت تداول آلي ينفّذ الصفقات بدلك 24/7 ويحقق 
+        أرباح حتى وأنت نايم ⚡  
         ✅ إشراف مباشر من مدرب شخصي 24/7  
         ✅ مساعد ذكي يحلل السوق لحظيًا ويعطيك الإشارات فورًا  
         ✅ دعم فني ونفسي مستمر حتى تصل لهدفك المالي 
@@ -75,6 +77,7 @@ def t(uid, key):
 # قائمة العملات والشبكات (تعدّلها زي ما تحب)
 COINS = {
     "USDT": ["TRC20", "ERC20", "BEP20", "Polygon", "Arbitrum", "Optimism"],
+    "USDC": ["ERC20", "TRC20", "Polygon", "BEP20", "Arbitrum", "Optimism", "Base", "Solana"],
     "BTC": ["Bitcoin"],
     "ETH": ["Ethereum"],
     "BNB": ["BEP20"],
@@ -95,9 +98,9 @@ def start(m):
 
     markup = InlineKeyboardMarkup(row_width=1)
     markup.add(
-        InlineKeyboardButton("📈 توصيات VIP فقط - 15$", callback_data="plan_vip_only"),
-        InlineKeyboardButton("🤖 مساعد ذكي فقط - 75$", callback_data="plan_ai_only"),
-        InlineKeyboardButton("💎 الكل مع بعض - 65$", callback_data="plan_both")
+        InlineKeyboardButton("📈 توصيات VIP فقط - 16$", callback_data="plan_vip_only"),
+        InlineKeyboardButton("🤖 مساعد ذكي فقط - 76$", callback_data="plan_ai_only"),
+        InlineKeyboardButton("💎 الكل مع بعض - 66$", callback_data="plan_both")
     )
 
     # إظهار التجديد فقط للأعضاء اللي عندهم رفرال ناجح
@@ -165,16 +168,31 @@ def net_selected(c):
 
 def create_payment(uid, pay_currency):
     user = db["users"][uid]
-    price = RENEW_PRICES.get(user["plan"], PRICES[user["plan"]]) if user.get("renew") else PRICES[user["plan"]]
+    plan = user["plan"]
+
+    # لو تجديد وعنده رفرال ناجح → يدفع السعر المخفّض (10$ أو 55$)
+    if user.get("renew") and uid in db["members"]:
+        has_ref = any(
+            ref in db["members"]
+            for ref in db.get("referrals", {}).values()
+            if db["referrals"].get(ref) == uid
+        )
+        if has_ref:
+            price = RENEW_PRICES[plan]   # ← 10$ أو 55$ حسب الباقة
+        else:
+            price = PRICES[plan]         # ← السعر الجديد العادي (16$ أو 66$)
+    else:
+        price = PRICES[plan]                 # ← مشترك جديد
 
     payload = {
         "price_amount": price,
         "price_currency": "usd",
         "pay_currency": pay_currency,
         "order_id": f"{uid}_{int(time.time())}",
-        "order_description": f"VIP {user['plan']} - {user['full_name']}",
+        "order_description": f"ORORA.UN - {plan}",
         "customer_email": user["email"]
     }
+    # باقي الكود زي ما هو...
 
     try:
         r = requests.post("https://api.nowpayments.io/v1/invoice", json=payload, headers={"x-api-key": NOWPAYMENTS_KEY})
