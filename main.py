@@ -272,7 +272,7 @@ def create_payment(uid, coin, network):
     price = RENEW_PRICES[plan] if user.get("renew") else PRICES[plan]
     order_id = f"{uid}_{int(time.time())}"
 
-    # ===== تحديد pay_currency الصحيح للعملة + الشبكة =====
+    # تحديد pay_currency
     NETWORK_MAP = {
         "USDT": {
             "trc20": "usdttrc20",
@@ -290,6 +290,24 @@ def create_payment(uid, coin, network):
             "polygon": "usdcpolygon",
             "sol": "usdcspl"
         }
+    }
+
+    if coin not in NETWORK_MAP or network not in NETWORK_MAP[coin]:
+        bot.send_message(uid, "العملة أو الشبكة غير مدعومة.")
+        return
+
+    pay_currency = NETWORK_MAP[coin][network]
+
+    # إنشاء طلب الدفع (مثال باستخدام API وهمي)
+    payment_link = create_payment_link(amount=price, currency=pay_currency, order_id=order_id)
+
+    bot.send_message(uid, f"لإتمام الدفع، استخدم الرابط التالي:\n{payment_link}")
+    db["payments"][order_id] = {
+        "uid": uid,
+        "coin": coin,
+        "network": network,
+        "price": price,
+        "status": "pending"
     }
 
     # العملات العادية بدون شبكات
