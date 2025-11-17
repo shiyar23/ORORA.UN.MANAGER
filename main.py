@@ -46,14 +46,14 @@ PRICES = {"vip_only": 16, "ai_only": 76, "both": 66}
 RENEW_PRICES = {"vip_only": 10, "ai_only": 65, "both": 55}
 CHANNELS = {"vip": os.getenv("VIP_CHANNEL", "t.me/your_vip_channel"), "ai": os.getenv("AI_CHANNEL", "t.me/your_ai_channel")}
 
-# === العملات والشبكات المدعومة ===
+# === العملات والشبكات المدعومة (عرض للمستخدم) ===
 SUPPORTED_COINS = {
     "USDT": {
         "name": "Tether USDT",
         "networks": {
             "trc20": "TRC20 (ترون - الأرخص والأسرع)",
             "erc20": "ERC20 (إيثيريوم)",
-            "bep20": "BEP20 (بينانس سمارت شين)",
+            "bep20": "BEP20 (BSC)",
             "polygon": "Polygon",
             "sol": "Solana",
             "avax": "Avalanche C-Chain",
@@ -64,10 +64,10 @@ SUPPORTED_COINS = {
         "name": "USD Coin",
         "networks": {
             "erc20": "ERC20 (إيثيريوم)",
-            "bep20": "BEP20",
+            "bep20": "BEP20 (BSC)",
             "polygon": "Polygon",
             "sol": "Solana",
-            "tron": "TRC20"
+            "trc20": "TRC20 (Tron)"
         }
     },
     "BTC": {"name": "Bitcoin", "networks": {"btc": "Bitcoin Network"}},
@@ -77,6 +77,35 @@ SUPPORTED_COINS = {
     "SOL": {"name": "Solana", "networks": {"sol": "Solana"}},
     "MATIC": {"name": "Polygon", "networks": {"polygon": "Polygon"}},
     "AVAX": {"name": "Avalanche", "networks": {"avax": "Avalanche C-Chain"}}
+}
+
+# === خريطة تحويل (عملة + شبكة) -> رمز NOWPayments الصحيح ===
+# هذه الخرائط تحوّل اختيار المستخدم إلى قيمة pay_currency التي يتوقعها NOWPayments
+PAY_CURRENCY_MAPPING = {
+    "USDT": {
+        "trc20": "usdttrc20",
+        "erc20": "usdteth",   # أحيانًا 'usdt' يقبلها أيضا؛ 'usdteth' أكثر تحديدًا
+        "bep20": "usdtbsc",
+        "polygon": "usdtpolygon",
+        "sol": "usdtsol",
+        "avax": "usdtavax",
+        "ton": "usdton"
+    },
+    "USDC": {
+        "trc20": "usdctrc20",
+        "erc20": "usdceth",
+        "bep20": "usdcbsc",
+        "polygon": "usdcpolygon",
+        "sol": "usdcsol"
+    },
+    # العملات الأخرى عادةً تستخدم اسم العملة نفسه
+    "BTC": {"btc": "btc"},
+    "ETH": {"erc20": "eth"},
+    "BNB": {"bep20": "bnb"},
+    "TRX": {"trx": "trx"},
+    "SOL": {"sol": "sol"},
+    "MATIC": {"polygon": "matic"},
+    "AVAX": {"avax": "avax"}
 }
 
 # === النصوص ===
@@ -174,7 +203,7 @@ def get_email(m):
     save_db()
 
     markup = InlineKeyboardMarkup(row_width=2)
-    coins = ["USDT", "USDC", "BTC", "ETH", "BNB", "TRX", "SOL", "MATIC", "AVAX"]
+    coins = list(SUPPORTED_COINS.keys())
     for coin in coins:
         markup.add(InlineKeyboardButton(f"{coin}", callback_data=f"coin_{coin}"))
     bot.send_message(uid, t("choose_coin"), reply_markup=markup)
@@ -187,11 +216,14 @@ def coin_selected(c):
     bot.answer_callback_query(c.id)
 
     db["users"][uid]["coin"] = coin
+    db["users"][uid]["step"] = "choose_network"
     save_db()
 
-    networks = SUPPORTED_COINS[coin]["networks"]
+    # جلب الشبكات المتاحة للعرض
+    networks = SUPPORTED_COINS.get(coin, {}).get("networks", {})
     markup = InlineKeyboardMarkup(row_width=1)
     for net_code, net_name in networks.items():
+        # callback_data: net_<COIN>_<NETWORK_CODE>
         markup.add(InlineKeyboardButton(net_name, callback_data=f"net_{coin}_{net_code}"))
 
     bot.edit_message_text(
@@ -205,13 +237,29 @@ def coin_selected(c):
 @bot.callback_query_handler(func=lambda c: c.data.startswith("net_"))
 def network_selected(c):
     uid = str(c.message.chat.id)
-    _, coin, network = c.data.split("_")
+    parts = c.data.split("_", 2)
+    if len(parts) != 3:
+        bot.answer_callback_query(c.id, "اختيار غير صالح", show_alert=True)
+        return
+
+    _, coin, network = parts
+    network = network.lower()
     bot.answer_callback_query(c.id, f"تم اختيار {coin} على شبكة {network.upper()}")
 
     db["users"][uid]["network"] = network
     save_db()
 
-    create_payment(uid, coin.lower(), network)
+    # قم بتحويل (عملة + شبكة) إلى رمز NOWPayments
+    mapped = None
+    if coin in PAY_CURRENCY_MAPPING:
+        mapped = PAY_CURRENCY_MAPPING[coin].get(network)
+    # إذا لم يوجد mapping، استخدم coin.lower() كقيمة افتراضية
+    pay_currency = mapped or coin.lower()
+
+    # سجل لتصحيح الأخطاء
+    print(f"[create_payment] uid={uid} coin={coin} network={network} -> pay_currency={pay_currency}")
+
+    create_payment(uid, pay_currency, network)
 
 # === إنشاء الفاتورة ===
 def create_payment(uid, pay_currency, network=None):
@@ -227,7 +275,7 @@ def create_payment(uid, pay_currency, network=None):
     payload = {
         "price_amount": price,
         "price_currency": "usd",
-        "pay_currency": pay_currency,
+        "pay_currency": pay_currency,  # يجب أن يكون الرمز الصحيح (مثل usdttrc20)
         "order_id": order_id,
         "order_description": f"ORORA.UN - {plan} - {pay_currency.upper()}{f' ({network.upper()})' if network else ''}",
     }
@@ -238,40 +286,49 @@ def create_payment(uid, pay_currency, network=None):
     try:
         bot_username = bot.get_me().username
         payload["success_url"] = f"https://t.me/{bot_username}"
-    except:
+    except Exception:
         pass
 
     headers = {"x-api-key": NOWPAYMENTS_KEY, "Content-Type": "application/json"}
-    
+
     try:
         url = "https://api.nowpayments.io/v1/invoice"
-        if network and network != pay_currency:
-            payload["pay_currency"] = pay_currency
-            payload["fixed_rate"] = True  # مهم للعملات مثل USDT على شبكات مختلفة
+        # لبعض العملات الثابتة على شبكات متعددة، يفضل طلب fixed_rate True لتجميد السعر
+        if pay_currency.startswith("usdt") or pay_currency.startswith("usdc"):
+            payload["fixed_rate"] = True
         r = requests.post(url, json=payload, headers=headers, timeout=20)
-        data = r.json()
+        try:
+            data = r.json()
+        except ValueError:
+            data = {"error": "invalid_json", "raw": r.text}
     except Exception as e:
         bot.send_message(uid, "حدث خطأ في بوابة الدفع. حاول لاحقًا.")
-        print("NOWPayments error:", e)
+        print("NOWPayments request exception:", e)
         return
 
+    # لوج كامل للاستجابة — مفيد للتصحيح
+    print("NOWPayments response:", r.status_code, data)
+
     if r.status_code not in (200, 201):
-        msg = data.get("message", "خطأ غير معروف")
+        # حاول استخراج رسالة الخطأ المحتملة
+        msg = data.get("message") or data.get("error") or data.get("detail") or data.get("message_description") or str(data)
         bot.send_message(uid, f"فشل إنشاء الفاتورة: {msg}")
         return
 
-    invoice_url = data.get("invoice_url")
-    invoice_id = str(data.get("invoice_id") or data.get("id"))
+    # NOWPayments قد ترجع id أو invoice_id و invoice_url أو payment_url
+    invoice_url = data.get("invoice_url") or data.get("payment_url") or data.get("url")
+    invoice_id = str(data.get("invoice_id") or data.get("id") or data.get("invoiceId"))
 
     if not invoice_url or not invoice_id:
         bot.send_message(uid, "فشل في إنشاء رابط الدفع. تواصل مع الدعم.")
+        print("Missing invoice data:", data)
         return
 
     db["pending"][invoice_id] = {
         "user_id": uid,
         "plan": plan,
         "order_id": order_id,
-        "coin": pay_currency.upper(),
+        "pay_currency": pay_currency,
         "network": network.upper() if network else None
     }
     save_db()
@@ -307,18 +364,22 @@ def activate_user(uid, plan):
 # === Webhook ===
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    signature = request.headers.get("x-nowpayments-signature")
+    signature = request.headers.get("x-nowpayments-signature") or request.headers.get("X-NowPayments-Signature")
     if not signature:
+        print("Webhook: no signature header present")
         abort(400)
 
     data = request.get_data()
     expected = hmac.new(IPN_SECRET.encode(), data, hashlib.sha512).hexdigest()
     if not hmac.compare_digest(signature, expected):
+        print("Webhook: invalid signature", signature, expected)
         abort(400)
 
     payload = request.get_json(force=True)
-    invoice_id = str(payload.get("invoice_id") or payload.get("id"))
+    invoice_id = str(payload.get("invoice_id") or payload.get("id") or payload.get("invoiceId"))
     status = payload.get("payment_status") or payload.get("status")
+
+    print("Webhook payload:", invoice_id, status)
 
     if status in ["finished", "confirmed", "paid", "successful"] and invoice_id in db["pending"]:
         info = db["pending"].pop(invoice_id)
@@ -332,5 +393,5 @@ if __name__ == "__main__":
     import threading
     port = int(os.getenv("PORT", 8080))
     threading.Thread(target=app.run, kwargs={"host": "0.0.0.0", "port": port}, daemon=True).start()
-    print("البوت يعمل الآن مع دعم جميع العملات والشبكات!")
+    print("البوت يعمل الآن مع دعم العملات والشبكات المختارة!")
     bot.infinity_polling(none_stop=True)
