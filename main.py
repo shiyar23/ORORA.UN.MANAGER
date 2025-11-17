@@ -237,11 +237,11 @@ def coin_selected(c):
     db["users"][uid]["step"] = "choose_network"
     save_db()
     
-     networks = SUPPORTED_COINS.get(coin, {}).get("networks", {})
-     markup = InlineKeyboardMarkup(row_width=1)
-     for net_code, net_name in networks.items():
-         callback_data: net_<COIN>_<NETWORK_CODE>
-         markup.add(InlineKeyboardButton(net_name, callback_data=f"net_{coin}_{net_code}"))
+     # networks = SUPPORTED_COINS.get(coin, {}).get("networks", {})
+     # markup = InlineKeyboardMarkup(row_width=1)
+     # for net_code, net_name in networks.items():
+     #     callback_data: net_<COIN>_<NETWORK_CODE>
+     #     markup.add(InlineKeyboardButton(net_name, callback_data=f"net_{coin}_{net_code}"))
 
     # فقط الشبكات المدعومة حاليًا من NOWPayments لكل عملة
     SUPPORTED_NETWORKS_FOR_PAYMENTS = {
