@@ -142,7 +142,7 @@ def start(m):
     markup = InlineKeyboardMarkup(row_width=1)
     markup.add(
         InlineKeyboardButton("VIP فقط - 16$", callback_data="plan_vip_only"),
-        InlineKeyboardButton("مساعد ذكي فقط - 76$", callback_data="plan_ai_only"),
+        InlineKeyboardButton("مساعد ذكي  فقط - 76$", callback_data="plan_ai_only"),
         InlineKeyboardButton("الكل مع بعض - 66$", callback_data="plan_both")
     )
     if uid in db["members"]:
@@ -317,10 +317,17 @@ def create_payment(uid, pay_currency, network=None):
         # ]
         
         # التحقق قبل إضافة fixed_rate
-        if pay_currency not in ["usdttrc20", "usdtbsc", "usdtsolana", "usdterc20", "usdcsolana", "usdctrc20", "usdcbsc", "usdcerc20", "usdctrc20", "usdcpolygon", "ethereumerc20", "bnbbep20", "solsolana", "trxtrc20", "trxtron", "usdcbep20" ]:
-            payload["fixed_rate"] = True
-        else:
+        if pay_currency.lower() not in [
+            # USDT
+            "usdttrc20", "usdterc20", "usdtbsc", "usdtpolygon", "usdtsol", "usdtavax", "usdton",
+            # USDC
+            "usdctrc20", "usdcerc20", "usdcbsc", "usdcpolygon", "usdcsol",
+            # العملات الأساسية الأخرى
+            "btc", "eth", "bnb", "trx", "sol", "matic", "avax"
+        ]:
             print(f"[INFO] fixed_rate تم تجاهله لـ {pay_currency}")
+        else:
+            payload["fixed_rate"] = True
             r = requests.post(url, json=payload, headers=headers, timeout=20)
         try:
             data = r.json()
