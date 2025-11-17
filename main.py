@@ -299,7 +299,7 @@ def create_payment(uid, pay_currency, network=None):
             payload["fixed_rate"] = True  # فقط للعملات/الشبكات التي تدعم ذلك
         else:
             print(f"[INFO] fixed_rate تم تجاهله لـ {pay_currency}")
-                r = requests.post(url, json=payload, headers=headers, timeout=20)
+            r = requests.post(url, json=payload, headers=headers, timeout=20)
         try:
             data = r.json()
         except ValueError:
