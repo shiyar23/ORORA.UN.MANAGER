@@ -295,11 +295,11 @@ def create_payment(uid, pay_currency, network=None):
         url = "https://api.nowpayments.io/v1/invoice"
         # لبعض العملات الثابتة على شبكات متعددة، يفضل طلب fixed_rate True لتجميد السعر
 # تجنب fixed_rate للعملات المستقرة لتجنب خطأ NOWPayments
-    if pay_currency not in ["usdttrc20", "usdtbsc", "usdctrc20", "usdcbsc"]:
-        payload["fixed_rate"] = True  # فقط للعملات/الشبكات التي تدعم ذلك
-    else:
-        print(f"[INFO] fixed_rate تم تجاهله لـ {pay_currency}")
-            r = requests.post(url, json=payload, headers=headers, timeout=20)
+        if pay_currency not in ["usdttrc20", "usdtbsc", "usdctrc20", "usdcbsc"]:
+            payload["fixed_rate"] = True  # فقط للعملات/الشبكات التي تدعم ذلك
+        else:
+            print(f"[INFO] fixed_rate تم تجاهله لـ {pay_currency}")
+                r = requests.post(url, json=payload, headers=headers, timeout=20)
         try:
             data = r.json()
         except ValueError:
