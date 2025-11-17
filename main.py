@@ -5,6 +5,8 @@ import os
 import time
 import hmac
 import hashlib
+import random
+import re
 from datetime import datetime, timedelta
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from dotenv import load_dotenv
@@ -14,9 +16,18 @@ load_dotenv()
 
 # === المتغيرات ===
 TOKEN = os.getenv("BOT_TOKEN")
-OWNER_ID = int(os.getenv("OWNER_ID"))
+OWNER_ID = int(os.getenv("OWNER_ID", "0") or 0)
 NOWPAYMENTS_KEY = os.getenv("NOWPAYMENTS_KEY")
-IPN_SECRET = os.getenv("IPN_SECRET", "IYPgA4RMwFKQYntBGC/hZ3LrP3sfPX35")  # تأكد أنك حاطط الـ Secret في .env
+IPN_SECRET = os.getenv("IPN_SECRET", "IYPgA4RMwFKQYntBGC/hZ3LrP3sfPX35")  # ضع الـ IPN secret الصحيح في .env
+WEBHOOK_BASE = os.getenv("WEBHOOK_BASE")  # مثال: https://yourapp.example.com  (مهم!)
+
+if not TOKEN:
+    raise RuntimeError("BOT_TOKEN غير معرّف في .env")
+if not NOWPAYMENTS_KEY:
+    raise RuntimeError("NOWPAYMENTS_KEY غير معرّف في .env")
+if not WEBHOOK_BASE:
+    # مجرد تحذير — لكن إنشاء الفاتورة سيفشل لو لم يكن لديك رابط Webhook فعّال
+    print("تحذير: WEBHOOK_BASE غير معرّف. اضبطه في .env (مثال: https://yourapp.example.com)")
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
@@ -34,14 +45,14 @@ def save_db():
         json.dump(db, f, ensure_ascii=False, indent=4)
 
 # === القنوات والأسعار ===
-CHANNELS = {"vip": os.getenv("VIP_CHANNEL"), "ai": os.getenv("AI_CHANNEL")}
+CHANNELS = {"vip": os.getenv("VIP_CHANNEL", "t.me/your_vip_channel"), "ai": os.getenv("AI_CHANNEL", "t.me/your_ai_channel")}
 PRICES = {"vip_only": 16, "ai_only": 76, "both": 66}
 RENEW_PRICES = {"vip_only": 10, "ai_only": 65, "both": 55}
 
-# === النصوص (الإيميل أصبح إجباري) ===
+# === النصوص ===
 TEXT = {
     "ar": {
-        "welcome": "ORORA.UN \n\n🟢 مرحبًا بك في البوابة الرسمية للثراء الحقيقي ...\n\nاختر الباقة اللي تناسب طموحك الآن وابدأ رحلتك للحرية المالية خلال أيام قليلة فقط ⬇️",
+        "welcome": "ORORA.UN \n\n🟢 مرحبًا بك في البوابة الرسمية... اختر الباقة اللي تناسب طموحك الآن ⬇️",
         "vip_only": "📈 توصيات VIP فقط\n• أرباح يومية مضمونة\nالسعر: 16$",
         "ai_only": "🤖 المساعد الذكي فقط\nالسعر: 76$",
         "both": "💎 الباقة الكاملة\n• توصيات VIP + المساعد الذكي\nالسعر: 66$",
@@ -54,10 +65,10 @@ TEXT = {
     }
 }
 
-def t(key): 
+def t(key):
     return TEXT["ar"][key]
 
-# === بداية الأوامر ===
+# === البدء ===
 @bot.message_handler(commands=['start'])
 def start(m):
     uid = str(m.chat.id)
@@ -124,7 +135,6 @@ def get_name(m):
 
 # التحقق من صحة الإيميل
 def is_valid_email(email):
-    import re
     pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
     return re.match(pattern, email.strip()) is not None
 
@@ -156,11 +166,26 @@ def coin_selected(c):
 
     create_payment(uid, coin.lower())
 
+# === مساعدة: الحصول على رقم الفاتورة من استجابة NOWPayments بشكل آمن ===
+def extract_invoice_id(resp_json: dict):
+    """
+    NOWPayments قد ترجع 'id' أو 'invoice_id' بحسب الـ endpoint/version.
+    نستخدم أيًا منهما إذا وُجد.
+    """
+    return resp_json.get("id") or resp_json.get("invoice_id") or resp_json.get("invoiceId")
+
 # === إنشاء الفاتورة ===
 def create_payment(uid, pay_currency):
-    user = db["users"][uid]
+    user = db["users"].get(uid)
+    if not user:
+        bot.send_message(uid, "حدث خطأ: بيانات المستخدم غير موجودة. أعد المحاولة.")
+        return
+
     plan = user["plan"]
     price = RENEW_PRICES[plan] if user.get("renew") else PRICES[plan]
+
+    # تأكد من وجود رابط webhook فعّال
+    ipn_url = f"{WEBHOOK_BASE.rstrip('/')}/webhook" if WEBHOOK_BASE else None
 
     payload = {
         "price_amount": price,
@@ -168,26 +193,49 @@ def create_payment(uid, pay_currency):
         "pay_currency": pay_currency,
         "order_id": f"{uid}_{int(time.time())}",
         "order_description": f"ORORA.UN - {plan}",
-        "ipn_callback_url": f"https://exemplary-optimism-production.up.railway.app/webhook",
-        "success_url": f"https://t.me/{bot.get_me().username}"
     }
+    if ipn_url:
+        payload["ipn_callback_url"] = ipn_url
+    # success_url يوجّه المستخدم بعد الدفع (اختياري)
+    try:
+        bot_username = bot.get_me().username
+        payload["success_url"] = f"https://t.me/{bot_username}"
+    except Exception:
+        payload["success_url"] = ""
 
     headers = {"x-api-key": NOWPAYMENTS_KEY, "Content-Type": "application/json"}
-    r = requests.post("https://api.nowpayments.io/v1/invoice", json=payload, headers=headers)
 
-    if r.status_code != 200:
-        bot.send_message(uid, "⚠️ حدث خطأ في إنشاء الفاتورة، جرب لاحقًا.")
+    try:
+        r = requests.post("https://api.nowpayments.io/v1/invoice", json=payload, headers=headers, timeout=15)
+    except requests.RequestException as e:
+        bot.send_message(uid, "⚠️ حدث خطأ في الاتصال ببوابة الدفع. حاول لاحقًا.")
+        print("NowPayments request failed:", e)
         return
 
-    data = r.json()
-    if "invoice_url" not in data:
-        bot.send_message(uid, f"خطأ: {data.get('message', 'Unknown error')}")
+    try:
+        data = r.json()
+    except ValueError:
+        bot.send_message(uid, "⚠️ استجابة غير متوقعة من بوابة الدفع.")
+        print("Invalid JSON from nowpayments:", r.text)
         return
 
-    url = data["invoice_url"]
-    inv_id = data["id"]
+    if r.status_code not in (200, 201):
+        # حاول إظهار رسالة خطأ مفيدة للمستخدم
+        msg = data.get("message") or data.get("error") or data.get("detail") or r.text
+        bot.send_message(uid, f"⚠️ حدث خطأ في إنشاء الفاتورة: {msg}")
+        print("NowPayments create invoice error:", r.status_code, data)
+        return
 
-    db["pending"][str(inv_id)] = {"user_id": uid, "plan": plan}
+    inv_id = extract_invoice_id(data)
+    url = data.get("invoice_url") or data.get("payment_url") or data.get("url")
+
+    if not inv_id or not url:
+        bot.send_message(uid, "⚠️ استجابة البوابة ناقصة (لا يوجد رابط الدفع). تواصل مع الدعم.")
+        print("Missing invoice id or url:", data)
+        return
+
+    # خزن باستخدام str(inv_id) لضمان التوافق في المقارنة لاحقًا
+    db["pending"][str(inv_id)] = {"user_id": uid, "plan": plan, "order_id": payload["order_id"]}
     save_db()
 
     markup = InlineKeyboardMarkup()
@@ -197,29 +245,43 @@ def create_payment(uid, pay_currency):
 # === تفعيل العضوية ===
 def activate_user(uid, plan):
     uid = str(uid)
-    code = "VIP-" + ''.join(__import__('random').choices("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", k=8))
+    code = "VIP-" + ''.join(random.choices("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", k=8))
     expiry = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
 
     db["members"][uid] = {"code": code, "plan": plan, "expiry": expiry}
     save_db()
 
     links = ""
+    # التحقق من وجود الكلمات الصحيحة في اسم الخطة
     if "vip" in plan or plan == "both":
         links += f"قناة التوصيات:\n{CHANNELS['vip']}\n\n"
     if "ai" in plan or plan == "both":
         links += f"المساعد الذكي:\n{CHANNELS['ai']}\n"
 
+    try:
+        botname = bot.get_me().username
+    except Exception:
+        botname = "your_bot"
+
+    clean_uid = uid.lstrip('-') if uid.startswith('-') else uid
+
     bot.send_message(int(uid), t("success").format(
         code=code, date=expiry, links=links,
-        botname=bot.get_me().username, uid=uid.lstrip('-') if uid.startswith('-') else uid
+        botname=botname, uid=clean_uid
     ))
 
-# === الـ Webhook الصحيح 100% (HMAC-SHA512) ===
+# === الـ Webhook (HMAC-SHA512) ===
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    signature = request.headers.get("x-nowpayments-signature")
-    data = request.get_data()
+    # NOWPayments يرسل هيدر التوقيع؛ قد يكون بصيغة مختلفة. نحاول الالتقاط بعدة أسماء
+    signature = request.headers.get("x-nowpayments-signature") or request.headers.get("X-NowPayments-Signature") or request.headers.get("x-nowpayments-signature-sha512")
+    data = request.get_data()  # bytes
 
+    if not signature:
+        print("No signature header present")
+        abort(400)
+
+    # حساب HMAC-SHA512 على الجسم كما هو
     expected_sig = hmac.new(
         IPN_SECRET.encode('utf-8'),
         data,
@@ -227,23 +289,41 @@ def webhook():
     ).hexdigest()
 
     if not hmac.compare_digest(signature, expected_sig):
+        print("Invalid IPN signature", signature, expected_sig)
         abort(400)
 
-    payload = request.get_json(force=True)
-    inv_id = str(payload.get("invoice_id"))
-    status = payload.get("payment_status")
+    try:
+        payload = request.get_json(force=True)
+    except Exception as e:
+        print("Invalid JSON in webhook:", e)
+        abort(400)
 
-    if status in ["finished", "confirmed", "partially_paid"] and inv_id in db["pending"]:
-        info = db["pending"][inv_id]
-        activate_user(info["user_id"], info["plan"])
-        db["pending"].pop(inv_id, None)
-        save_db()
+    # بعض إصدارات NOWPayments ترسل invoice_id وفيها payment_status أو status
+    inv_id = str(payload.get("invoice_id") or payload.get("id") or payload.get("invoiceId"))
+    status = payload.get("payment_status") or payload.get("status")
+
+    print("Webhook received:", inv_id, status)
+
+    # الحالات التي نعتبرها مدفوعة / مكتملة
+    if status and inv_id:
+        if status in ["finished", "confirmed", "partially_paid", "paid", "successful"]:
+            # تطابق مع db
+            if inv_id in db.get("pending", {}):
+                info = db["pending"][inv_id]
+                try:
+                    activate_user(info["user_id"], info["plan"])
+                except Exception as e:
+                    print("Failed to activate user:", e)
+                # احذف من pending
+                db["pending"].pop(inv_id, None)
+                save_db()
 
     return "OK", 200
 
-# === تشغيل البوت ===
+# === تشغيل البوت + فلاسْك ===
 if __name__ == "__main__":
     import threading
-    threading.Thread(target=app.run, kwargs={"host": "0.0.0.0", "port": int(os.getenv("PORT", 8080))}, daemon=True).start()
+    port = int(os.getenv("PORT", 8080))
+    threading.Thread(target=app.run, kwargs={"host": "0.0.0.0", "port": port}, daemon=True).start()
     print("البوت شغال 100% - التفعيل الآلي مفعل!")
     bot.infinity_polling(none_stop=True, interval=0)
