@@ -14,18 +14,23 @@ from flask import Flask, request, abort
 
 load_dotenv()
 
+# === المتغيرات ===
 TOKEN = os.getenv("BOT_TOKEN")
+OWNER_ID = int(os.getenv("OWNER_ID", "0") or 0)
 NOWPAYMENTS_KEY = os.getenv("NOWPAYMENTS_KEY")
 IPN_SECRET = os.getenv("IPN_SECRET", "IYPgA4RMwFKQYntBGC/hZ3LrP3sfPX35")
 WEBHOOK_BASE = os.getenv("WEBHOOK_BASE")
 
-if not TOKEN or not NOWPAYMENTS_KEY:
-    raise RuntimeError("تحقق من BOT_TOKEN و NOWPAYMENTS_KEY في .env")
+if not TOKEN:
+    raise RuntimeError("BOT_TOKEN غير معرّف في .env")
+if not NOWPAYMENTS_KEY:
+    raise RuntimeError("NOWPAYMENTS_KEY غير معرّف في .env")
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 DB_FILE = "db.json"
 
+# === قاعدة البيانات ===
 if os.path.exists(DB_FILE):
     with open(DB_FILE, "r", encoding="utf-8") as f:
         db = json.load(f)
@@ -36,144 +41,246 @@ def save_db():
     with open(DB_FILE, "w", encoding="utf-8") as f:
         json.dump(db, f, ensure_ascii=False, indent=4)
 
+# === الأسعار والقنوات ===
 PRICES = {"vip_only": 16, "ai_only": 76, "both": 66}
 RENEW_PRICES = {"vip_only": 10, "ai_only": 65, "both": 55}
-CHANNELS = {
-    "vip": os.getenv("VIP_CHANNEL", "t.me/your_vip_channel"),
-    "ai": os.getenv("AI_CHANNEL", "t.me/your_ai_channel")
-}
+CHANNELS = {"vip": os.getenv("VIP_CHANNEL", "t.me/your_vip_channel"), "ai": os.getenv("AI_CHANNEL", "t.me/your_ai_channel")}
 
-# تحويل الشبكات إلى صيغة NOWPayments الصحيحة
-NETWORK_MAP = {
-    "trc20": "trx", "erc20": "eth", "bep20": "bsc", "polygon": "polygon",
-    "sol": "sol", "avax": "avaxc", "ton": "ton", "btc": "btc", "trx": "trx"
-}
-
+# === العملات والشبكات المدعومة ===
 SUPPORTED_COINS = {
-    "USDT": {"name": "Tether USDT", "networks": {
-        "trc20": "TRC20 (ترون - الأرخص والأسرع)", "erc20": "ERC20", "bep20": "BEP20",
-        "polygon": "Polygon", "sol": "Solana", "avax": "Avalanche", "ton": "TON"
-    }},
-    "USDC": {"name": "USD Coin", "networks": {
-        "erc20": "ERC20", "bep20": "BEP20", "polygon": "Polygon", "sol": "Solana", "tron": "TRC20"
-    }},
-    "BTC": {"name": "Bitcoin", "networks": {"btc": "Bitcoin"}},
+    "USDT": {
+        "name": "Tether USDT",
+        "networks": {
+            "trc20": "TRC20 (ترون - الأرخص والأسرع)",
+            "erc20": "ERC20 (إيثيريوم)",
+            "bep20": "BEP20 (بينانس سمارت شين)",
+            "polygon": "Polygon",
+            "sol": "Solana",
+            "avax": "Avalanche C-Chain",
+            "ton": "TON Network"
+        }
+    },
+    "USDC": {
+        "name": "USD Coin",
+        "networks": {
+            "erc20": "ERC20 (إيثيريوم)",
+            "bep20": "BEP20",
+            "polygon": "Polygon",
+            "sol": "Solana",
+            "tron": "TRC20"
+        }
+    },
+    "BTC": {"name": "Bitcoin", "networks": {"btc": "Bitcoin Network"}},
     "ETH": {"name": "Ethereum", "networks": {"erc20": "ERC20"}},
-    "BNB": {"name": "Binance Coin", "networks": {"bep20": "BEP20"}},
-    "TRX": {"name": "TRON", "networks": {"trx": "TRON"}},
+    "BNB": {"name": "Binance Coin", "networks": {"bep20": "BEP20 (BSC)"}},
+    "TRX": {"name": "TRON", "networks": {"trx": "TRON Network"}},
     "SOL": {"name": "Solana", "networks": {"sol": "Solana"}},
     "MATIC": {"name": "Polygon", "networks": {"polygon": "Polygon"}},
-    "AVAX": {"name": "Avalanche", "networks": {"avax": "Avalanche"}}
+    "AVAX": {"name": "Avalanche", "networks": {"avax": "Avalanche C-Chain"}}
 }
 
+# === النصوص ===
 TEXT = {
     "ar": {
-        "welcome": """ORORA.UN\n\nمرحبًا بك في البوابة الرسمية للثراء الحقيقي...\nاختر باقتك الآن ⬇️""",
-        "vip_only": "توصيات VIP فقط • 16$",
-        "ai_only": "المساعد الذكي فقط • 76$",
-        "both": "الباقة الكاملة • 66$",
-        "ask_name": "اكتب اسمك الكامل:",
-        "ask_email": "ادخل إيميلك الصحيح:",
-        "invalid_email": "الإيميل غير صحيح! مثال: name@gmail.com",
-        "choose_coin": "اختر العملة للدفع:",
-        "choose_network": "اختر الشبكة لـ {coin}:",
-        "pay_now": "اضغط الزر للدفع الآن:",
-        "success": "تم التفعيل بنجاح!\n\nرقم العضوية: {code}\nالصلاحية حتى: {date}\n\n{links}\n\nرابط دعوتك:\nt.me/{botname}?start=ref{uid}"
+        "welcome": "ORORA.UN \n\nمرحبًا بك في البوابة الرسمية للثراء الحقيقي\nاختر الباقة التي تناسب طموحك ⬇️",
+        "vip_only": "توصيات VIP فقط\n• أرباح يومية مضمونة\nالسعر: 16$",
+        "ai_only": "المساعد الذكي فقط\nالسعر: 76$",
+        "both": "الباقة الكاملة\n• VIP + المساعد الذكي\nالسعر: 66$",
+        "ask_name": "اكتب اسمك الكامل (الأول + الأخير):",
+        "ask_email": "ادخل إيميلك الصحيح (إجباري):",
+        "invalid_email": "الإيميل غير صحيح! أعد إرساله بشكل صحيح (مثال: name@example.com)",
+        "choose_coin": "اختر العملة التي تريد الدفع بها:",
+        "choose_network": "اختر الشبكة المناسبة لـ {coin}:",
+        "pay_now": "اضغط الزر تحت للدفع الآن:",
+        "success": "تم التفعيل بنجاح!\n\nرقم العضوية: {code}\nالصلاحية: حتى {date}\n\n{links}\n\nرابط الدعوة الخاص بك:\nt.me/{botname}?start=ref{uid}"
     }
 }
-def t(key, **kw): return TEXT["ar"][key].format(**kw)
 
-# باقي الكود (start, name, email, coin, network) نفس ما كان...
+def t(key, **kwargs):
+    return TEXT["ar"][key].format(**kwargs)
 
+# === البداية ===
 @bot.message_handler(commands=['start'])
 def start(m):
     uid = str(m.chat.id)
-    if len(m.text.split()) > 1 and m.text.split()[1].startswith("ref"):
-        ref = m.text.split()[1][3:]
-        if ref.isdigit() and ref != uid:
-            db["referrals"][uid] = ref
+    args = m.text.split()
+    if len(args) > 1 and args[1].startswith("ref"):
+        ref_id = args[1][3:]
+        if ref_id.isdigit() and ref_id != uid:
+            db["referrals"][uid] = ref_id
             save_db()
+
     markup = InlineKeyboardMarkup(row_width=1)
     markup.add(
         InlineKeyboardButton("VIP فقط - 16$", callback_data="plan_vip_only"),
         InlineKeyboardButton("مساعد ذكي فقط - 76$", callback_data="plan_ai_only"),
-        InlineKeyboardButton("الكل معًا - 66$", callback_data="plan_both")
+        InlineKeyboardButton("الكل مع بعض - 66$", callback_data="plan_both")
     )
     if uid in db["members"]:
         markup.add(InlineKeyboardButton("تجديد بخصم", callback_data="renew"))
+
     bot.send_message(m.chat.id, t("welcome"), reply_markup=markup)
 
-# ... (جميع الـ handlers السابقة نفسها بدون تغيير حتى network_selected)
+@bot.callback_query_handler(func=lambda c: c.data.startswith("plan_") or c.data == "renew")
+def plan_selected(c):
+    uid = str(c.message.chat.id)
+    bot.answer_callback_query(c.id)
+    if c.data == "renew":
+        if uid not in db["members"]:
+            bot.answer_callback_query(c.id, "ليس لديك عضوية لتجديدها!", show_alert=True)
+            return
+        plan = db["members"][uid]["plan"]
+        renew = True
+    else:
+        plan = c.data.replace("plan_", "")
+        renew = False
 
+    db["users"][uid] = {"step": "name", "plan": plan, "renew": renew}
+    save_db()
+
+    bot.edit_message_text(
+        chat_id=c.message.chat.id,
+        message_id=c.message.message_id,
+        text=t(plan)
+    )
+    bot.send_message(c.message.chat.id, t("ask_name"))
+
+# === الخطوات ===
+@bot.message_handler(func=lambda m: str(m.chat.id) in db["users"] and db["users"][str(m.chat.id)]["step"] == "name")
+def get_name(m):
+    uid = str(m.chat.id)
+    name = m.text.strip()
+    if len(name.split()) < 2:
+        bot.reply_to(m, "اكتب الاسم الكامل (اسم + كنية)")
+        return
+    db["users"][uid]["name"] = name
+    db["users"][uid]["step"] = "email"
+    save_db()
+    bot.reply_to(m, t("ask_email"))
+
+def is_valid_email(email):
+    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    return re.match(pattern, email.strip()) is not None
+
+@bot.message_handler(func=lambda m: str(m.chat.id) in db["مستخدمين"] and db["users"][str(m.chat.id)]["step"] == "email")
+def get_email(m):
+    uid = str(m.chat.id)
+    email = m.text.strip()
+    if not is_valid_email(email):
+        bot.reply_to(m, t("invalid_email"))
+        return
+    db["users"][uid]["email"] = email
+    db["users"][uid]["step"] = "choose_coin"
+    save_db()
+
+    markup = InlineKeyboardMarkup(row_width=2)
+    coins = ["USDT", "USDC", "BTC", "ETH", "BNB", "TRX", "SOL", "MATIC", "AVAX"]
+    for coin in coins:
+        markup.add(InlineKeyboardButton(f"{coin}", callback_data=f"coin_{coin}"))
+    bot.send_message(uid, t("choose_coin"), reply_markup=markup)
+
+# === اختيار العملة ===
+@bot.callback_query_handler(func=lambda c: c.data.startswith("coin_"))
+def coin_selected(c):
+    uid = str(c.message.chat.id)
+    coin = c.data.split("_")[1]
+    bot.answer_callback_query(c.id)
+
+    db["users"][uid]["coin"] = coin
+    save_db()
+
+    networks = SUPPORTED_COINS[coin]["networks"]
+    markup = InlineKeyboardMarkup(row_width=1)
+    for net_code, net_name in networks.items():
+        markup.add(InlineKeyboardButton(net_name, callback_data=f"net_{coin}_{net_code}"))
+
+    bot.edit_message_text(
+        chat_id=c.message.chat.id,
+        message_id=c.message.message_id,
+        text=t("choose_network", coin=SUPPORTED_COINS[coin]["name"]),
+        reply_markup=markup
+    )
+
+# === اختيار الشبكة وإنشاء الفاتورة ===
 @bot.callback_query_handler(func=lambda c: c.data.startswith("net_"))
 def network_selected(c):
     uid = str(c.message.chat.id)
-    _, coin, net = c.data.split("_", 2)
-    db["users"][uid]["coin"] = coin
-    db["users"][uid]["network"] = net
-    save_db()
-    bot.answer_callback_query(c.id, f"تم اختيار {coin} - {net.upper()}")
-    create_payment(uid, coin, net)
+    _, coin, network = c.data.split("_")
+    bot.answer_callback_query(c.id, f"تم اختيار {coin} على شبكة {network.upper()}")
 
-# الدالة الجديدة كليًا (الحل النهائي)
-def create_payment(uid, coin, network=None):
+    db["users"][uid]["network"] = network
+    save_db()
+
+    create_payment(uid, coin.lower(), network)
+
+# === إنشاء الفاتورة ===
+def create_payment(uid, pay_currency, network=None):
     user = db["users"].get(uid)
     if not user:
-        return bot.send_message(uid, "خطأ، أعد المحاولة.")
+        bot.send_message(uid, "حدث خطأ. أعد المحاولة.")
+        return
 
     plan = user["plan"]
     price = RENEW_PRICES[plan] if user.get("renew") else PRICES[plan]
-
-    # تحديد pay_currency بشكل صحيح
-    if coin.upper() in ["USDT", "USDC"] and network:
-        net_code = NETWORK_MAP.get(network, network)
-        pay_currency = f"{coin.lower()}_{net_code}"
-    else:
-        pay_currency = coin.lower()
+    order_id = f"{uid}_{int(time.time())}"
 
     payload = {
         "price_amount": price,
         "price_currency": "usd",
         "pay_currency": pay_currency,
-        "order_id": f"{uid}_{int(time.time())}",
-        "order_description": f"ORORA.UN - {plan}",
-        "ipn_callback_url": f"{WEBHOOK_BASE.rstrip('/')}/webhook" if WEBHOOK_BASE else None,
-        "success_url": f"https://t.me/{bot.get_me().username}"
+        "order_id": order_id,
+        "order_description": f"ORORA.UN - {plan} - {pay_currency.upper()}{f' ({network.upper()})' if network else ''}",
     }
 
-    headers = {"x-api-key": NOWPAYMENTS_KEY, "Content-Type": "application/json"}
+    if WEBHOOK_BASE:
+        payload["ipn_callback_url"] = f"{WEBHOOK_BASE.rstrip('/')}/webhook"
 
     try:
-        r = requests.post("https://api.nowpayments.io/v1/payment", json=payload, headers=headers, timeout=20)
-        r.raise_for_status()
+        bot_username = bot.get_me().username
+        payload["success_url"] = f"https://t.me/{bot_username}"
+    except:
+        pass
+
+    headers = {"x-api-key": NOWPAYMENTS_KEY, "Content-Type": "application/json"}
+    
+    try:
+        url = "https://api.nowpayments.io/v1/invoice"
+        if network and network != pay_currency:
+            payload["pay_currency"] = pay_currency
+            payload["fixed_rate"] = True  # مهم للعملات مثل USDT على شبكات مختلفة
+        r = requests.post(url, json=payload, headers=headers, timeout=20)
         data = r.json()
-    except requests.exceptions.HTTPError as e:
-        err = r.json().get("message", "خطأ غير معروف")
-        bot.send_message(uid, f"فشل الدفع:\n{err}")
-        print("NOWPayments Error:", r.text)
-        return
     except Exception as e:
-        bot.send_message(uid, "مشكلة في بوابة الدفع، حاول لاحقًا.")
+        bot.send_message(uid, "حدث خطأ في بوابة الدفع. حاول لاحقًا.")
+        print("NOWPayments error:", e)
         return
 
-    payment_id = data.get("payment_id")
+    if r.status_code not in (200, 201):
+        msg = data.get("message", "خطأ غير معروف")
+        bot.send_message(uid, f"فشل إنشاء الفاتورة: {msg}")
+        return
+
     invoice_url = data.get("invoice_url")
+    invoice_id = str(data.get("invoice_id") or data.get("id"))
 
-    if not payment_id or not invoice_url:
-        bot.send_message(uid, "فشل إنشاء الفاتورة، تواصل مع الدعم.")
+    if not invoice_url or not invoice_id:
+        bot.send_message(uid, "فشل في إنشاء رابط الدفع. تواصل مع الدعم.")
         return
 
-    db["pending"][str(payment_id)] = {"user_id": uid, "plan": plan}
+    db["pending"][invoice_id] = {
+        "user_id": uid,
+        "plan": plan,
+        "order_id": order_id,
+        "coin": pay_currency.upper(),
+        "network": network.upper() if network else None
+    }
     save_db()
 
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("ادفع الآن", url=invoice_url))
+    bot.send_message(uid, f"{pay_currency.upper()}{f' ({network.upper()})' if network else ''}\nالسعر: {price}$\n\n{t('pay_now')}", reply_markup=markup)
 
-    net_name = SUPPORTED_COINS[coin]["networks"].get(network, network.upper()) if network else ""
-    bot.send_message(uid,
-        f"{coin.upper()}{f' ({net_name})' if net_name else ''}\nالمبلغ: {price} دولار\n\n{t('pay_now')}",
-        reply_markup=markup)
-
+# === تفعيل العضوية ===
 def activate_user(uid, plan):
     uid = str(uid)
     code = "VIP-" + ''.join(random.choices("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", k=8))
@@ -183,35 +290,47 @@ def activate_user(uid, plan):
 
     links = ""
     if "vip" in plan or plan == "both":
-        links += f"قناة VIP:\n{CHANNELS['vip']}\n\n"
+        links += f"قناة التوصيات VIP:\n{CHANNELS['vip']}\n\n"
     if "ai" in plan or plan == "both":
         links += f"المساعد الذكي:\n{CHANNELS['ai']}\n"
 
-    botname = bot.get_me().username or "yourbot"
-    clean_uid = uid.lstrip('-') if uid.startswith('-') else uid
-    bot.send_message(int(uid), t("success").format(code=code, date=expiry, links=links, botname=botname, uid=clean_uid))
+    try:
+        botname = bot.get_me().username
+    except:
+        botname = "yourbot"
 
+    clean_uid = uid.lstrip('-') if uid.startswith('-') else uid
+    bot.send_message(int(uid), t("success").format(
+        code=code, date=expiry, links=links, botname=botname, uid=clean_uid
+    ))
+
+# === Webhook ===
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    sig = request.headers.get("x-nowpayments-signature")
-    if not sig: return "No sig", 400
+    signature = request.headers.get("x-nowpayments-signature")
+    if not signature:
+        abort(400)
+
     data = request.get_data()
     expected = hmac.new(IPN_SECRET.encode(), data, hashlib.sha512).hexdigest()
-    if not hmac.compare_digest(sig, expected): return "Invalid sig", 400
+    if not hmac.compare_digest(signature, expected):
+        abort(400)
 
     payload = request.get_json(force=True)
-    payment_id = str(payload.get("payment_id") or payload.get("id"))
+    invoice_id = str(payload.get("invoice_id") or payload.get("id"))
     status = payload.get("payment_status") or payload.get("status")
 
-    if status in ["finished", "confirmed", "paid", "successful"] and payment_id in db["pending"]:
-        info = db["pending"].pop(payment_id)
+    if status in ["finished", "confirmed", "paid", "successful"] and invoice_id in db["pending"]:
+        info = db["pending"].pop(invoice_id)
         save_db()
         activate_user(info["user_id"], info["plan"])
 
     return "OK", 200
 
+# === التشغيل ===
 if __name__ == "__main__":
     import threading
-    threading.Thread(target=app.run, kwargs={"host": "0.0.0.0", "port": int(os.getenv("PORT", 8080))}, daemon=True).start()
-    print("البوت شغال 100% – بدون أي خطأ fixed_rate نهائيًا!")
+    port = int(os.getenv("PORT", 8080))
+    threading.Thread(target=app.run, kwargs={"host": "0.0.0.0", "port": port}, daemon=True).start()
+    print("البوت يعمل الآن مع دعم جميع العملات والشبكات!")
     bot.infinity_polling(none_stop=True)
