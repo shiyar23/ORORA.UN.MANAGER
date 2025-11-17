@@ -262,7 +262,7 @@ def network_selected(c):
     create_payment(uid, pay_currency, network)
 
 # === إنشاء الفاتورة ===
-def create_payment(uid, coin, network):
+def create_payment(uid, pay_currency, network=None):
     user = db["users"].get(uid)
     if not user:
         bot.send_message(uid, "حدث خطأ. أعد المحاولة.")
@@ -272,116 +272,71 @@ def create_payment(uid, coin, network):
     price = RENEW_PRICES[plan] if user.get("renew") else PRICES[plan]
     order_id = f"{uid}_{int(time.time())}"
 
-    # تحديد pay_currency
-    NETWORK_MAP = {
-        "USDT": {
-            "trc20": "usdttrc20",
-            "erc20": "usdterc20",
-            "bep20": "usdtbsc",
-            "polygon": "usdtpolygon",
-            "sol": "usdtsol",
-            "avax": "usdtavax",
-            "ton": "usdttn"
-        },
-        "USDC": {
-            "trc20": "usdctrc20",
-            "erc20": "usdcer20",
-            "bep20": "usdcbsc",
-            "polygon": "usdcpolygon",
-            "sol": "usdcspl"
-        }
-    }
-
-    if coin not in NETWORK_MAP or network not in NETWORK_MAP[coin]:
-        bot.send_message(uid, "العملة أو الشبكة غير مدعومة.")
-        return
-
-    pay_currency = NETWORK_MAP[coin][network]
-
-    # إنشاء طلب الدفع (مثال باستخدام API وهمي)
-    payment_link = create_payment_link(amount=price, currency=pay_currency, order_id=order_id)
-
-    bot.send_message(uid, f"لإتمام الدفع، استخدم الرابط التالي:\n{payment_link}")
-    db["payments"][order_id] = {
-        "uid": uid,
-        "coin": coin,
-        "network": network,
-        "price": price,
-        "status": "pending"
-    }
-
-    # العملات العادية بدون شبكات
-    SIMPLE_COINS = ["BTC", "ETH", "BNB", "SOL", "TRX", "AVAX", "MATIC"]
-
-    if coin.upper() in SIMPLE_COINS:
-        pay_currency = coin.lower()
-
-    else:
-        # USDT / USDC
-        try:
-            pay_currency = NETWORK_MAP[coin.upper()][network]
-        except:
-            bot.send_message(uid, "هذه الشبكة غير مدعومة حالياً.")
-            return
-
-    # ===== بناء بيانات الفاتورة =====
     payload = {
         "price_amount": price,
         "price_currency": "usd",
-        "pay_currency": pay_currency,
+        "pay_currency": pay_currency,  # يجب أن يكون الرمز الصحيح (مثل usdttrc20)
         "order_id": order_id,
-        "order_description": f"ORORA.UN - {plan} - {pay_currency}",
+        "order_description": f"ORORA.UN - {plan} - {pay_currency.upper()}{f' ({network.upper()})' if network else ''}",
     }
 
-    # ===== URL Webhook =====
     if WEBHOOK_BASE:
         payload["ipn_callback_url"] = f"{WEBHOOK_BASE.rstrip('/')}/webhook"
 
     try:
         bot_username = bot.get_me().username
         payload["success_url"] = f"https://t.me/{bot_username}"
-    except:
+    except Exception:
         pass
 
     headers = {"x-api-key": NOWPAYMENTS_KEY, "Content-Type": "application/json"}
 
-    # ===== إرسال طلب إنشاء الفاتورة =====
-    r = requests.post(
-        "https://api.nowpayments.io/v1/invoice",
-        json=payload,
-        headers=headers,
-        timeout=20
-    )
+    try:
+        url = "https://api.nowpayments.io/v1/invoice"
+        # لبعض العملات الثابتة على شبكات متعددة، يفضل طلب fixed_rate True لتجميد السعر
+        if pay_currency.startswith("usdt") or pay_currency.startswith("usdc"):
+            payload["fixed_rate"] = True
+        r = requests.post(url, json=payload, headers=headers, timeout=20)
+        try:
+            data = r.json()
+        except ValueError:
+            data = {"error": "invalid_json", "raw": r.text}
+    except Exception as e:
+        bot.send_message(uid, "حدث خطأ في بوابة الدفع. حاول لاحقًا.")
+        print("NOWPayments request exception:", e)
+        return
 
-    data = r.json()
+    # لوج كامل للاستجابة — مفيد للتصحيح
     print("NOWPayments response:", r.status_code, data)
 
     if r.status_code not in (200, 201):
-        msg = data.get("message", "خطأ غير معروف")
+        # حاول استخراج رسالة الخطأ المحتملة
+        msg = data.get("message") or data.get("error") or data.get("detail") or data.get("message_description") or str(data)
         bot.send_message(uid, f"فشل إنشاء الفاتورة: {msg}")
         return
 
-    invoice_url = data.get("invoice_url")
-    invoice_id = str(data.get("invoice_id") or data.get("id"))
+    # NOWPayments قد ترجع id أو invoice_id و invoice_url أو payment_url
+    invoice_url = data.get("invoice_url") or data.get("payment_url") or data.get("url")
+    invoice_id = str(data.get("invoice_id") or data.get("id") or data.get("invoiceId"))
+
+    if not invoice_url or not invoice_id:
+        bot.send_message(uid, "فشل في إنشاء رابط الدفع. تواصل مع الدعم.")
+        print("Missing invoice data:", data)
+        return
 
     db["pending"][invoice_id] = {
         "user_id": uid,
         "plan": plan,
         "order_id": order_id,
-        "coin": coin.upper(),
-        "network": network.upper()
+        "pay_currency": pay_currency,
+        "network": network.upper() if network else None
     }
     save_db()
 
-    # زر الدفع
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("ادفع الآن", url=invoice_url))
+    bot.send_message(uid, f"{pay_currency.upper()}{f' ({network.upper()})' if network else ''}\nالسعر: {price}$\n\n{t('pay_now')}", reply_markup=markup)
 
-    bot.send_message(
-        uid,
-        f"{coin.upper()} ({network.upper()})\nالسعر: {price}$\n\nاضغط أدناه للدفع:",
-        reply_markup=markup
-    )
 # === تفعيل العضوية ===
 def activate_user(uid, plan):
     uid = str(uid)
