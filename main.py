@@ -295,8 +295,30 @@ def create_payment(uid, pay_currency, network=None):
         url = "https://api.nowpayments.io/v1/invoice"
         # لبعض العملات الثابتة على شبكات متعددة، يفضل طلب fixed_rate True لتجميد السعر
 # تجنب fixed_rate للعملات المستقرة لتجنب خطأ NOWPayments
-        if pay_currency not in ["usdttrc20", "usdtbsc", "usdctrc20", "usdcbsc"]:
-            payload["fixed_rate"] = True  # فقط للعملات/الشبكات التي تدعم ذلك
+# جميع العملات والشبكات التي يمكن السماح لها بـ fixed_rate
+        FIXED_RATE_ALLOWED = [
+            # العملات الأساسية
+            "btc", "eth", "bnb", "trx", "sol", "matic", "avax",
+        
+            # USDT
+            "usdttrc20", "usdtbsc", "usdterc20", "usdtsolana", "usdtpolygon", "usdtavax", "usdton",
+        
+            # USDC
+            "usdctrc20", "usdcbsc", "usdcerc20", "usdcsol", "usdcpolygon",
+        
+            # عملات أخرى بحسب الشبكات في PAY_CURRENCY_MAPPING
+            "ethereumerc20",  # ETH على ERC20
+            "bnbbep20",       # BNB على BSC
+            "solsolana",      # SOL على Solana
+            "trxtrc20", "trxtron",  # TRX على TRC20 وTRON
+            "usdcbep20",      # USDC على BSC
+            "maticpolygon",   # MATIC على Polygon
+            "avaxavax"        # AVAX على Avalanche
+        ]
+        
+        # التحقق قبل إضافة fixed_rate
+        if pay_currency.lower() in FIXED_RATE_ALLOWED:
+            payload["fixed_rate"] = True
         else:
             print(f"[INFO] fixed_rate تم تجاهله لـ {pay_currency}")
             r = requests.post(url, json=payload, headers=headers, timeout=20)
