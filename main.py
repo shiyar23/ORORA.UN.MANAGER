@@ -178,7 +178,7 @@ def coin_selected(c):
     bot.send_message(uid, f"🌐 اختر الشبكة الخاصة بعملة {coin}:", reply_markup=markup)
 
 
-    @bot.callback_query_handler(func=lambda c: c.data.startswith("net_"))
+@bot.callback_query_handler(func=lambda c: c.data.startswith("net_"))
 def network_selected(c):
     uid = str(c.message.chat.id)
     network = c.data.split("_")[1]  # TRC20 / ERC20 / BSC
