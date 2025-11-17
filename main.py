@@ -294,14 +294,7 @@ def create_payment(uid, pay_currency, network=None):
     try:
         url = "https://api.nowpayments.io/v1/invoice"
         # لبعض العملات الثابتة على شبكات متعددة، يفضل طلب fixed_rate True لتجميد السعر
-        if pay_currency.lower() not in [
-            # USDT
-            "usdttrc20", "usdterc20", "usdtbsc", "usdtpolygon", "usdtsol", "usdtavax", "usdton",
-            # USDC
-            "usdctrc20", "usdcerc20", "usdcbsc", "usdcpolygon", "usdcsol",
-            # العملات الأساسية الأخرى
-            "btc", "eth", "bnb", "trx", "sol", "matic", "avax"
-        ]:
+        if pay_currency not in ["usdttrc20", "usdtbsc", "usdtsolana", "usdterc20", "usdcsolana", "usdctrc20", "usdcbsc", "usdcerc20", "usdctrc20", "usdcpolygon", "ethereumerc20", "bnbbep20", "solsolana", "trxtrc20", "trxtron", "usdcbep20" ]:
             print(f"[INFO] fixed_rate تم تجاهله لـ {pay_currency}")
         else:
             payload["fixed_rate"] = True
