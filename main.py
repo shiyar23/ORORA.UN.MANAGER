@@ -3,6 +3,8 @@ import requests
 import json
 import os
 import time
+import hmac
+import hashlib
 from datetime import datetime, timedelta
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from dotenv import load_dotenv
@@ -14,7 +16,7 @@ load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
 OWNER_ID = int(os.getenv("OWNER_ID"))
 NOWPAYMENTS_KEY = os.getenv("NOWPAYMENTS_KEY")
-IPN_SECRET = "IYPgA4RMwFKQYntBGC/hZ3LrP3sfPX35"
+IPN_SECRET = os.getenv("IPN_SECRET", "IYPgA4RMwFKQYntBGC/hZ3LrP3sfPX35")  # تأكد أنك حاطط الـ Secret في .env
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
@@ -36,52 +38,35 @@ CHANNELS = {"vip": os.getenv("VIP_CHANNEL"), "ai": os.getenv("AI_CHANNEL")}
 PRICES = {"vip_only": 16, "ai_only": 76, "both": 66}
 RENEW_PRICES = {"vip_only": 10, "ai_only": 65, "both": 55}
 
-# === النصوص ===
+# === النصوص (الإيميل أصبح إجباري) ===
 TEXT = {
     "ar": {
-        "welcome": """
-        ORORA.UN 
-
-        🟢 مرحبًا بك في البوابة الرسمية للثراء الحقيقي 
-
-        نحن هنا لنأخذك من الصفر إلى القمة في عالم التداول والاستثمار بأسرع وأضمن الطرق الممكنة 
-
-        ماذا ستحصل عندنا؟
-
-        ✅ أقوى دورات تعليمية من الصفر إلى الاحتراف  
-        ✅ استراتيجيات تداول حصرية بمعدل نجاح 90%  
-        ✅ قنوات توصيات 
-        VIP للنخبة فقط (صفقات المليون يوميًا)  
-        ✅ بوت تداول آلي ينفّذ الصفقات بدلك 24/7 ويحقق 
-        أرباح حتى وأنت نايم ⚡  
-        ✅ إشراف مباشر من مدرب شخصي 24/7  
-        ✅ مساعد ذكي يحلل السوق لحظيًا ويعطيك الإشارات فورًا  
-        ✅ دعم فني ونفسي مستمر حتى تصل لهدفك المالي 
-
-        اختر الباقة اللي تناسب طموحك الآن وابدأ رحلتك للحرية المالية خلال أيام قليلة فقط ⬇️
-        """,
         "welcome": "ORORA.UN \n\n🟢 مرحبًا بك في البوابة الرسمية للثراء الحقيقي ...\n\nاختر الباقة اللي تناسب طموحك الآن وابدأ رحلتك للحرية المالية خلال أيام قليلة فقط ⬇️",
-        "vip_only": "📈 توصيات VIP فقط\n• أرباح يومية مضمونة\nالسعر: 15$",
-        "ai_only": "🤖 المساعد الذكي فقط\nالسعر: 75$",
-        "both": "💎 الباقة الكاملة\n• توصيات VIP + المساعد الذكي\nالسعر: 65$",
+        "vip_only": "📈 توصيات VIP فقط\n• أرباح يومية مضمونة\nالسعر: 16$",
+        "ai_only": "🤖 المساعد الذكي فقط\nالسعر: 76$",
+        "both": "💎 الباقة الكاملة\n• توصيات VIP + المساعد الذكي\nالسعر: 66$",
         "ask_name": "✍️ اكتب اسمك الكامل (الأول + الأخير):",
-        "ask_email": "📧 ادخل إيميلك (اختياري - ممكن تكتب أي حاجة):",
+        "ask_email": "📧 ادخل إيميلك الصحيح (إجباري):",
+        "invalid_email": "🚫 الإيميل غير صحيح! أعد إرساله بشكل صحيح (مثال: name@example.com)",
         "choose_coin": "💰 اختر العملة الدفع:",
         "pay_now": "💸 اضغط الزر تحت عشان تدفع الآن:",
         "success": "🎉 تم التفعيل بنجاح!\n\nرقم العضوية: {code}\nالصلاحية: حتى {date}\n\n{links}\n\nرابط الدعوة الخاص بك:\nt.me/{botname}?start=ref{uid}"
     }
 }
 
-def t(key): return TEXT["ar"][key]
+def t(key): 
+    return TEXT["ar"][key]
 
-# === الأوامر ===
+# === بداية الأوامر ===
 @bot.message_handler(commands=['start'])
 def start(m):
     uid = str(m.chat.id)
     args = m.text.split()
+
+    # نظام الإحالة
     if len(args) > 1 and args[1].startswith("ref"):
         ref_id = args[1][3:]
-        if ref_id.isdigit():
+        if ref_id.isdigit() and ref_id != uid:
             db["referrals"][uid] = ref_id
             save_db()
 
@@ -91,6 +76,7 @@ def start(m):
         InlineKeyboardButton("🤖 مساعد ذكي فقط - 76$", callback_data="plan_ai_only"),
         InlineKeyboardButton("💎 الكل مع بعض - 66$", callback_data="plan_both")
     )
+
     if uid in db["members"]:
         markup.add(InlineKeyboardButton("🔄 تجديد بخصم", callback_data="renew"))
 
@@ -99,29 +85,59 @@ def start(m):
 @bot.callback_query_handler(func=lambda c: c.data.startswith("plan_") or c.data == "renew")
 def plan_selected(c):
     uid = str(c.message.chat.id)
-    plan = c.data.replace("plan_", "") if c.data.startswith("plan_") else db["members"][uid]["plan"]
-    renew = c.data == "renew"
+    bot.answer_callback_query(c.id)
+
+    if c.data == "renew":
+        if uid not in db["members"]:
+            bot.answer_callback_query(c.id, "ليس لديك عضوية لتجديدها!", show_alert=True)
+            return
+        plan = db["members"][uid]["plan"]
+        renew = True
+    else:
+        plan = c.data.replace("plan_", "")
+        renew = False
 
     db["users"][uid] = {"step": "name", "plan": plan, "renew": renew}
     save_db()
 
-    desc = "vip_only" if plan == "vip_only" else "ai_only" if plan == "ai_only" else "both"
-    bot.edit_message_text(chat_id=c.message.chat.id, message_id=c.message.message_id, text=t(desc))
+    desc_map = {"vip_only": "vip_only", "ai_only": "ai_only", "both": "both"}
+    bot.edit_message_text(
+        chat_id=c.message.chat.id,
+        message_id=c.message.message_id,
+        text=t(desc_map[plan])
+    )
     bot.send_message(c.message.chat.id, t("ask_name"))
 
-# === استكمال الخطوات (الاسم → إيميل → عملة → دفع) ===
+# === الخطوات ===
 @bot.message_handler(func=lambda m: str(m.chat.id) in db["users"] and db["users"][str(m.chat.id)]["step"] == "name")
 def get_name(m):
     uid = str(m.chat.id)
-    db["users"][uid]["name"] = m.text.strip()
+    name = m.text.strip()
+    if len(name.split()) < 2:
+        bot.reply_to(m, "🚫 اكتب الاسم الكامل (اسم + كنية)")
+        return
+
+    db["users"][uid]["name"] = name
     db["users"][uid]["step"] = "email"
     save_db()
     bot.reply_to(m, t("ask_email"))
 
+# التحقق من صحة الإيميل
+def is_valid_email(email):
+    import re
+    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    return re.match(pattern, email.strip()) is not None
+
 @bot.message_handler(func=lambda m: str(m.chat.id) in db["users"] and db["users"][str(m.chat.id)]["step"] == "email")
 def get_email(m):
     uid = str(m.chat.id)
-    db["users"][uid]["email"] = m.text.strip()
+    email = m.text.strip()
+
+    if not is_valid_email(email):
+        bot.reply_to(m, t("invalid_email"))
+        return
+
+    db["users"][uid]["email"] = email
     db["users"][uid]["step"] = "coin"
     save_db()
 
@@ -136,16 +152,15 @@ def coin_selected(c):
     coin = c.data.split("_")[1]
     db["users"][uid]["coin"] = coin
     save_db()
+    bot.answer_callback_query(c.id)
 
     create_payment(uid, coin.lower())
-    bot.answer_callback_query(c.id)
 
 # === إنشاء الفاتورة ===
 def create_payment(uid, pay_currency):
     user = db["users"][uid]
     plan = user["plan"]
-    price = PRICES[plan]
-    if user.get("renew"): price = RENEW_PRICES[plan]
+    price = RENEW_PRICES[plan] if user.get("renew") else PRICES[plan]
 
     payload = {
         "price_amount": price,
@@ -157,11 +172,16 @@ def create_payment(uid, pay_currency):
         "success_url": f"https://t.me/{bot.get_me().username}"
     }
 
-    r = requests.post("https://api.nowpayments.io/v1/invoice", json=payload,
-                      headers={"x-api-key": NOWPAYMENTS_KEY})
+    headers = {"x-api-key": NOWPAYMENTS_KEY, "Content-Type": "application/json"}
+    r = requests.post("https://api.nowpayments.io/v1/invoice", json=payload, headers=headers)
+
+    if r.status_code != 200:
+        bot.send_message(uid, "⚠️ حدث خطأ في إنشاء الفاتورة، جرب لاحقًا.")
+        return
+
     data = r.json()
     if "invoice_url" not in data:
-        bot.send_message(uid, "حدث خطأ، جرب تاني بعد دقيقة")
+        bot.send_message(uid, f"خطأ: {data.get('message', 'Unknown error')}")
         return
 
     url = data["invoice_url"]
@@ -187,36 +207,36 @@ def activate_user(uid, plan):
     if "vip" in plan or plan == "both":
         links += f"قناة التوصيات:\n{CHANNELS['vip']}\n\n"
     if "ai" in plan or plan == "both":
-        links += f"المساعد الذكي:\n{CHANNELS['ai']}"
+        links += f"المساعد الذكي:\n{CHANNELS['ai']}\n"
 
     bot.send_message(int(uid), t("success").format(
         code=code, date=expiry, links=links,
-        botname=bot.get_me().username, uid=uid
+        botname=bot.get_me().username, uid=uid.lstrip('-') if uid.startswith('-') else uid
     ))
-# === اختيار العملة (السطر ده كان ناقص!) ===
-@bot.callback_query_handler(func=lambda c: c.data.startswith("coin_"))
-def coin_selected(c):
-    uid = str(c.message.chat.id)
-    coin = c.data.split("_")[1]
-    db["users"][uid]["coin"] = coin
-    db["users"][uid]["step"] = "done"   # عشان ما يطلبش حاجة تاني
-    save_db()
 
-    create_payment(uid, coin.lower())   # هنا بيبعت الفاتورة فورًا
-    bot.answer_callback_query(c.id)
-# === الـ Webhook الصحيح 100% ===
+# === الـ Webhook الصحيح 100% (HMAC-SHA512) ===
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    if request.headers.get("x-nowpayments-signature") != f"IPN {IPN_SECRET}":
-        abort(400)
-    data = request.get_json(force=True)
-    inv_id = str(data.get("invoice_id"))
-    status = data.get("payment_status")
+    signature = request.headers.get("x-nowpayments-signature")
+    data = request.get_data()
 
-    if status in ["finished", "confirmed"] and inv_id in db["pending"]:
+    expected_sig = hmac.new(
+        IPN_SECRET.encode('utf-8'),
+        data,
+        hashlib.sha512
+    ).hexdigest()
+
+    if not hmac.compare_digest(signature, expected_sig):
+        abort(400)
+
+    payload = request.get_json(force=True)
+    inv_id = str(payload.get("invoice_id"))
+    status = payload.get("payment_status")
+
+    if status in ["finished", "confirmed", "partially_paid"] and inv_id in db["pending"]:
         info = db["pending"][inv_id]
         activate_user(info["user_id"], info["plan"])
-        del db["pending"][inv_id]
+        db["pending"].pop(inv_id, None)
         save_db()
 
     return "OK", 200
@@ -224,6 +244,6 @@ def webhook():
 # === تشغيل البوت ===
 if __name__ == "__main__":
     import threading
-    threading.Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080))), daemon=True).start()
+    threading.Thread(target=app.run, kwargs={"host": "0.0.0.0", "port": int(os.getenv("PORT", 8080))}, daemon=True).start()
     print("البوت شغال 100% - التفعيل الآلي مفعل!")
-    bot.infinity_polling()
+    bot.infinity_polling(none_stop=True, interval=0)
