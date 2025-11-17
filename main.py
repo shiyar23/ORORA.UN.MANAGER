@@ -162,7 +162,7 @@ def is_valid_email(email):
     pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
     return re.match(pattern, email.strip()) is not None
 
-@bot.message_handler(func=lambda m: str(m.chat.id) in db["مستخدمين"] and db["users"][str(m.chat.id)]["step"] == "email")
+@bot.message_handler(func=lambda m: str(m.chat.id) in db["users"] and db["users"][str(m.chat.id)]["step"] == "email")
 def get_email(m):
     uid = str(m.chat.id)
     email = m.text.strip()
