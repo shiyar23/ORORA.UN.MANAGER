@@ -11,7 +11,7 @@ import time
 
 # ===================== التوكن الجديد =====================
 TOKEN = "8537451145:AAG-ZgzkCPh1rUsWCAzZ726Y_maPx7aSq_4"
-OWNER_ID = 123456789  # غيّر هذا بـ ID بتاعك الرقمي
+OWNER_ID = 6016715958  # غيّر هذا بـ ID بتاعك الرقمي
 
 # NOWPayments API Key (سجل في https://nowpayments.io وخذ المفتاح)
 NOWPAYMENTS_KEY = "A7K9F3M2N8P5Q1R6T9V4X0Z8B6C3D1E5F7G2H4J9K8L6M3N1P0Q5R8T2V7X4Z9B6C1D"
